@@ -1,0 +1,31 @@
+// Example Prisma schema
+// This schema defines basic User and Task models to track task completion.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  telegramId String   @unique
+  name      String
+  tasks     Task[]
+  createdAt DateTime @default(now())
+}
+
+model Task {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  date      DateTime
+  completed Boolean  @default(false)
+  penaltyPaid Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+}
