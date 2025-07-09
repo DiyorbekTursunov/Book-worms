@@ -16,6 +16,13 @@ interface ChatMember {
   status: string
 }
 
+interface Task {
+  id: number
+  description: string
+  scheduledDate: Date
+  createdAt: Date
+}
+
 dotenv.config()
 
 const prisma = new PrismaClient()
@@ -35,6 +42,80 @@ export class BotService {
     }
   }
 
+  // Send task to channel when created
+  static async sendTaskToChannel(task: Task) {
+    try {
+      const taskDate = new Date(task.scheduledDate).toLocaleDateString('uz-UZ', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+
+      const message = `📋 <b>Yangi Vazifa Qo'shildi!</b>\n\n` +
+                     `📅 <b>Sana:</b> ${taskDate}\n` +
+                     `📝 <b>Vazifa:</b> ${task.description}\n\n` +
+                     `Vazifani belgilash uchun /vazifa buyrug'idan foydalaning!`;
+
+      await bot.telegram.sendMessage(groupId, message, {
+        parse_mode: "HTML",
+      })
+
+      console.log(`Vazifa kanalga yuborildi: ${task.description}`)
+    } catch (error) {
+      console.error("Vazifani kanalga yuborishda xatolik:", error)
+    }
+  }
+
+  // Send task update to channel
+  static async sendTaskUpdateToChannel(task: Task) {
+    try {
+      const taskDate = new Date(task.scheduledDate).toLocaleDateString('uz-UZ', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+
+      const message = `✏️ <b>Vazifa Yangilandi!</b>\n\n` +
+                     `📅 <b>Sana:</b> ${taskDate}\n` +
+                     `📝 <b>Yangi Vazifa:</b> ${task.description}\n\n` +
+                     `Yangilangan vazifani belgilash uchun /vazifa buyrug'idan foydalaning!`;
+
+      await bot.telegram.sendMessage(groupId, message, {
+        parse_mode: "HTML",
+      })
+
+      console.log(`Vazifa yangilanishi kanalga yuborildi: ${task.description}`)
+    } catch (error) {
+      console.error("Vazifa yangilanishini kanalga yuborishda xatolik:", error)
+    }
+  }
+
+  // Send task deletion notification to channel
+  static async sendTaskDeletionToChannel(task: Task) {
+    try {
+      const taskDate = new Date(task.scheduledDate).toLocaleDateString('uz-UZ', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+
+      const message = `🗑️ <b>Vazifa O'chirildi!</b>\n\n` +
+                     `📅 <b>Sana:</b> ${taskDate}\n` +
+                     `📝 <b>O'chirilgan Vazifa:</b> ${task.description}`;
+
+      await bot.telegram.sendMessage(groupId, message, {
+        parse_mode: "HTML",
+      })
+
+      console.log(`Vazifa o'chirilishi kanalga yuborildi: ${task.description}`)
+    } catch (error) {
+      console.error("Vazifa o'chirilishini kanalga yuborishda xatolik:", error)
+    }
+  }
+
   // Sync users with group members
   static async syncGroupMembers() {
     try {
@@ -45,17 +126,10 @@ export class BotService {
         const isGroupMember = await this.isUserGroupMember(Number.parseInt(user.telegramId))
 
         if (!isGroupMember) {
-          // User is no longer in group, you can either:
-          // 1. Delete the user
+          // User is no longer in group, delete the user
           await prisma.user.delete({
             where: { id: user.id },
           })
-
-          // OR 2. Mark user as inactive (add isActive field to schema)
-          // await prisma.user.update({
-          //   where: { id: user.id },
-          //   data: { isActive: false }
-          // });
 
           console.log(`Removed user ${user.name} (${user.telegramId}) - no longer in group`)
         }
@@ -65,7 +139,7 @@ export class BotService {
     }
   }
 
-  // Add new group members to database
+  // Add new group members to database and create task completions for existing tasks
   static async addNewGroupMember(userId: string, name: string) {
     try {
       const existingUser = await prisma.user.findUnique({
@@ -73,13 +147,28 @@ export class BotService {
       })
 
       if (!existingUser) {
-        await prisma.user.create({
+        const newUser = await prisma.user.create({
           data: {
             telegramId: userId,
             name: name,
           },
         })
-        console.log(`Added new user: ${name} (${userId})`)
+
+        // Create task completions for all existing tasks
+        const existingTasks = await prisma.task.findMany()
+
+        for (const task of existingTasks) {
+          await prisma.taskCompletion.create({
+            data: {
+              userId: newUser.id,
+              taskId: task.id,
+              completed: false,
+              penaltyPaid: false
+            }
+          })
+        }
+
+        console.log(`Added new user: ${name} (${userId}) with ${existingTasks.length} task completions`)
       }
     } catch (error) {
       console.error("Error adding new user:", error)
