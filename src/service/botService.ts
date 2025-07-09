@@ -1,7 +1,6 @@
 import { Telegraf } from "telegraf"
 import { PrismaClient } from "@prisma/client"
 import { CronJob } from "cron"
-import { generateStreakImage, generateStatisticsImage, generateGroupStatistics } from "../utils/chartGenerator"
 import * as dotenv from "dotenv"
 
 // Define ChatMember type manually based on Telegram Bot API
@@ -20,7 +19,7 @@ interface Task {
   id: number
   description: string
   scheduledDate: Date
-  createdAt?: Date // Make createdAt optional
+  createdAt?: Date
 }
 
 dotenv.config()
@@ -34,7 +33,6 @@ export class BotService {
   static async isUserGroupMember(userId: number): Promise<boolean> {
     try {
       const chatMember = await bot.telegram.getChatMember(groupId, userId)
-      // User is considered a member if they are not kicked, banned, or left
       return !["kicked", "left", "banned"].includes(chatMember.status)
     } catch (error) {
       console.error("Error checking user membership:", error)
@@ -42,20 +40,49 @@ export class BotService {
     }
   }
 
+  // Calculate user statistics
+  static async calculateUserStats(user: any) {
+    const completedTasks = user.tasks.filter((t: any) => t.completed).length
+    const totalTasks = user.tasks.length
+    const missedTasks = totalTasks - completedTasks
+    const efficiency = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+
+    // Calculate membership days
+    const membershipDays = Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+
+    return {
+      completedTasks,
+      totalTasks,
+      missedTasks,
+      efficiency,
+      membershipDays: membershipDays > 0 ? membershipDays : 1,
+    }
+  }
+
+  // Get user level based on streak (static for now)
+  static getUserLevel(streak: number): string {
+    if (streak >= 30) return "🏆 Ustoz"
+    if (streak >= 20) return "📚 Mutaxassis"
+    if (streak >= 10) return "📖 O'quvchi"
+    if (streak >= 5) return "📝 Boshlang'ich"
+    return "🌱 Yangi boshlovchi"
+  }
+
   // Send task to channel when created
   static async sendTaskToChannel(task: Task) {
     try {
-      const taskDate = new Date(task.scheduledDate).toLocaleDateString('uz-UZ', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
+      const taskDate = new Date(task.scheduledDate).toLocaleDateString("uz-UZ", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
 
-      const message = `📋 <b>Yangi Vazifa Qo'shildi!</b>\n\n` +
-                     `📅 <b>Sana:</b> ${taskDate}\n` +
-                     `📝 <b>Vazifa:</b> ${task.description}\n\n` +
-                     `Vazifani belgilash uchun /vazifa buyrug'idan foydalaning!`;
+      const message =
+        `📋 <b>Yangi Vazifa Qo'shildi!</b>\n\n` +
+        `📅 <b>Sana:</b> ${taskDate}\n` +
+        `📝 <b>Vazifa:</b> ${task.description}\n\n` +
+        `Vazifani belgilash uchun /vazifa buyrug'idan foydalaning!`
 
       await bot.telegram.sendMessage(groupId, message, {
         parse_mode: "HTML",
@@ -70,17 +97,18 @@ export class BotService {
   // Send task update to channel
   static async sendTaskUpdateToChannel(task: Task) {
     try {
-      const taskDate = new Date(task.scheduledDate).toLocaleDateString('uz-UZ', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
+      const taskDate = new Date(task.scheduledDate).toLocaleDateString("uz-UZ", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
 
-      const message = `✏️ <b>Vazifa Yangilandi!</b>\n\n` +
-                     `📅 <b>Sana:</b> ${taskDate}\n` +
-                     `📝 <b>Yangi Vazifa:</b> ${task.description}\n\n` +
-                     `Yangilangan vazifani belgilash uchun /vazifa buyrug'idan foydalaning!`;
+      const message =
+        `✏️ <b>Vazifa Yangilandi!</b>\n\n` +
+        `📅 <b>Sana:</b> ${taskDate}\n` +
+        `📝 <b>Yangi Vazifa:</b> ${task.description}\n\n` +
+        `Yangilangan vazifani belgilash uchun /vazifa buyrug'idan foydalaning!`
 
       await bot.telegram.sendMessage(groupId, message, {
         parse_mode: "HTML",
@@ -95,16 +123,17 @@ export class BotService {
   // Send task deletion notification to channel
   static async sendTaskDeletionToChannel(task: Task) {
     try {
-      const taskDate = new Date(task.scheduledDate).toLocaleDateString('uz-UZ', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
+      const taskDate = new Date(task.scheduledDate).toLocaleDateString("uz-UZ", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
 
-      const message = `🗑️ <b>Vazifa O'chirildi!</b>\n\n` +
-                     `📅 <b>Sana:</b> ${taskDate}\n` +
-                     `📝 <b>O'chirilgan Vazifa:</b> ${task.description}`;
+      const message =
+        `🗑️ <b>Vazifa O'chirildi!</b>\n\n` +
+        `📅 <b>Sana:</b> ${taskDate}\n` +
+        `📝 <b>O'chirilgan Vazifa:</b> ${task.description}`
 
       await bot.telegram.sendMessage(groupId, message, {
         parse_mode: "HTML",
@@ -116,21 +145,75 @@ export class BotService {
     }
   }
 
+  // Check and apply penalties for missed tasks
+  static async checkAndApplyPenalties() {
+    try {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      yesterday.setHours(0, 0, 0, 0)
+
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      // Find yesterday's task
+      const yesterdayTask = await prisma.task.findFirst({
+        where: {
+          scheduledDate: {
+            gte: yesterday,
+            lt: today,
+          },
+        },
+      })
+
+      if (!yesterdayTask) return
+
+      // Find all users who didn't complete yesterday's task
+      const users = await prisma.user.findMany({
+        include: {
+          tasks: {
+            where: { taskId: yesterdayTask.id },
+          },
+        },
+      })
+
+      for (const user of users) {
+        const taskCompletion = user.tasks[0]
+
+        if (!taskCompletion || !taskCompletion.completed) {
+          // Reset streak to 0 for users who missed the task
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { currentStreak: 0 },
+          })
+
+          // Mark as penalty (unpaid)
+          if (taskCompletion) {
+            await prisma.taskCompletion.update({
+              where: { id: taskCompletion.id },
+              data: { penaltyPaid: false },
+            })
+          }
+
+          console.log(`Applied penalty to user ${user.name} - streak reset to 0`)
+        }
+      }
+    } catch (error) {
+      console.error("Error applying penalties:", error)
+    }
+  }
+
   // Sync users with group members
   static async syncGroupMembers() {
     try {
-      // Get all users from database
       const dbUsers = await prisma.user.findMany()
 
       for (const user of dbUsers) {
         const isGroupMember = await this.isUserGroupMember(Number.parseInt(user.telegramId))
 
         if (!isGroupMember) {
-          // User is no longer in group, delete the user
           await prisma.user.delete({
             where: { id: user.id },
           })
-
           console.log(`Removed user ${user.name} (${user.telegramId}) - no longer in group`)
         }
       }
@@ -151,6 +234,7 @@ export class BotService {
           data: {
             telegramId: userId,
             name: name,
+            currentStreak: 0,
           },
         })
 
@@ -163,8 +247,8 @@ export class BotService {
               userId: newUser.id,
               taskId: task.id,
               completed: false,
-              penaltyPaid: false
-            }
+              penaltyPaid: false,
+            },
           })
         }
 
@@ -185,7 +269,6 @@ export class BotService {
           const name = member.first_name + (member.last_name ? ` ${member.last_name}` : "")
           await this.addNewGroupMember(member.id.toString(), name)
 
-          // Welcome message
           await ctx.reply(
             `Xush kelibsiz, ${name}! Book Worms guruhiga qo'shildingiz. Vazifalarni belgilash uchun /vazifa dan foydalaning.`,
           )
@@ -214,7 +297,6 @@ export class BotService {
       const userId = ctx.from?.id?.toString()
       if (!userId) return
 
-      // Check if user is still in group
       const isGroupMember = await this.isUserGroupMember(Number.parseInt(userId))
       if (!isGroupMember) {
         await ctx.reply("Siz guruh a'zosi emassiz. Iltimos, avval guruhga qo'shiling.")
@@ -241,25 +323,26 @@ export class BotService {
             },
           })
         } else {
-          await ctx.reply("Admin paneli: https://book-worms-webapp.vercel.app", {
-            reply_markup: { remove_keyboard: true },
-          })
+          await ctx.reply("Admin paneli: https://book-worms-webapp.vercel.app")
         }
       } else {
-        // Add user to database if not exists
         const name = ctx.from.first_name + (ctx.from.last_name ? ` ${ctx.from.last_name}` : "")
         await this.addNewGroupMember(userId, name)
 
-        await ctx.reply("Xush kelibsiz Book Worms ga! Vazifalarni belgilash uchun /vazifa dan foydalaning.")
+        await ctx.reply("Xush kelibsiz Book Worms ga!", {
+          reply_markup: {
+            keyboard: [[{ text: "Davomiylik" }, { text: "Statistika" }]],
+            resize_keyboard: true,
+          },
+        })
       }
     })
 
-    // Handle /vazifa command with user validation
+    // Handle /vazifa command with user validation and streak calculation
     bot.command("vazifa", async (ctx) => {
       const userId = ctx.from?.id?.toString()
       if (!userId) return
 
-      // Check if user is still in group
       const isGroupMember = await this.isUserGroupMember(Number.parseInt(userId))
       if (!isGroupMember) {
         await ctx.reply("Siz guruh a'zosi emassiz. Botdan foydalana olmaysiz.")
@@ -272,7 +355,6 @@ export class BotService {
       })
 
       if (!user) {
-        // Auto-add user if they're in group but not in database
         const name = ctx.from?.first_name + (ctx.from?.last_name ? ` ${ctx.from.last_name}` : "")
         await this.addNewGroupMember(userId, name || "Unknown")
         await ctx.reply("Siz ro'yxatga qo'shildingiz. Iltimos, qaytadan /vazifa buyrug'ini yuboring.")
@@ -302,12 +384,19 @@ export class BotService {
         where: { userId_taskId: { userId: user.id, taskId: task.id } },
       })
 
-      if (taskCompletion && !taskCompletion.completed) {
+      if (taskCompletion && taskCompletion.completed) {
+        await ctx.reply("Siz bu vazifani allaqachon belgiladingiz!")
+        return
+      }
+
+      if (taskCompletion) {
+        // Mark task as completed
         await prisma.taskCompletion.update({
           where: { userId_taskId: { userId: user.id, taskId: task.id } },
           data: { completed: true },
         })
 
+        // Calculate new streak
         const yesterday = new Date(today)
         yesterday.setDate(today.getDate() - 1)
 
@@ -315,45 +404,48 @@ export class BotService {
           where: { scheduledDate: { gte: yesterday, lt: today } },
         })
 
-        const prevCompletion = prevTask
-          ? await prisma.taskCompletion.findUnique({
-              where: { userId_taskId: { userId: user.id, taskId: prevTask.id } },
-            })
-          : null
+        let newStreak = user.currentStreak + 1
 
-        let newStreak = user.currentStreak
-        if (prevCompletion && !prevCompletion.completed) {
-          newStreak = 0
-        } else if (taskCompletion.completed) {
-          newStreak += 1
+        // Check if user missed yesterday's task
+        if (prevTask) {
+          const prevCompletion = await prisma.taskCompletion.findUnique({
+            where: { userId_taskId: { userId: user.id, taskId: prevTask.id } },
+          })
+
+          if (!prevCompletion || !prevCompletion.completed) {
+            newStreak = 1 // Reset to 1 if missed yesterday
+          }
         }
 
+        // Update user streak
         await prisma.user.update({
           where: { id: user.id },
           data: { currentStreak: newStreak },
         })
 
-        const streakImage = await generateStreakImage(user)
-        await ctx.replyWithPhoto(
-          { source: streakImage },
-          {
-            caption: `Qabul qilindi! Sizning davomiyligingiz: ${newStreak} kun`,
-          },
-        )
+        const level = this.getUserLevel(newStreak)
+
+        const message =
+          `✅ <b>Vazifa belgilandi!</b>\n\n` +
+          `👤 <b>Foydalanuvchi:</b> ${user.name}\n` +
+          `🏆 <b>Daraja:</b> ${level}\n` +
+          `🔥 <b>Uzluksiz kitob o'qish davomiyligi:</b> ${newStreak} kun\n\n` +
+          `Tabriklaymiz! Davom eting! 📚`
+
+        await ctx.reply(message, { parse_mode: "HTML" })
       } else {
-        await ctx.reply("Siz bu vazifani allaqachon belgiladingiz yoki bugun vazifa yo'q.")
+        await ctx.reply("Bugun uchun vazifa topilmadi.")
       }
     })
 
-    // Handle /user_status command with user validation
-    bot.command("user_status", async (ctx) => {
+    // Handle "Davomiylik" button
+    bot.hears("Davomiylik", async (ctx) => {
       const userId = ctx.from?.id?.toString()
       if (!userId) return
 
-      // Check if user is still in group
       const isGroupMember = await this.isUserGroupMember(Number.parseInt(userId))
       if (!isGroupMember) {
-        await ctx.reply("Siz guruh a'zosi emassiz. Botdan foydalana olmaysiz.")
+        await ctx.reply("Siz guruh a'zosi emassiz.")
         return
       }
 
@@ -363,34 +455,60 @@ export class BotService {
       })
 
       if (!user) {
-        await ctx.reply("Siz ro'yxatdan o'tmagansiz. Iltimos, /start buyrug'ini yuboring.")
+        await ctx.reply("Siz ro'yxatdan o'tmagansiz. /start buyrug'ini yuboring.")
         return
       }
 
-      const statsImage = await generateStatisticsImage(user)
-      await ctx.replyWithPhoto({ source: statsImage })
+      const stats = await this.calculateUserStats(user)
+      const level = this.getUserLevel(user.currentStreak)
+
+      const message =
+        `👤 <b>${user.name}</b>\n\n` +
+        `🏆 <b>Daraja:</b> ${level}\n` +
+        `🔥 <b>Uzluksiz kitob o'qish davomiyligi:</b> ${user.currentStreak} kun\n` +
+        `📅 <b>Guruhga a'zolikning:</b> ${stats.membershipDays} kuni\n` +
+        `✅ <b>Jami o'qigan kunlar:</b> ${stats.completedTasks}\n` +
+        `❌ <b>Jami qoldirgan kunlar:</b> ${stats.missedTasks}\n` +
+        `📊 <b>Mutolaa samaradorligi:</b> ${stats.efficiency}%`
+
+      await ctx.reply(message, { parse_mode: "HTML" })
     })
 
-    // Handle /stats command with admin validation
-    bot.command("stats", async (ctx) => {
+    // Handle "Statistika" button
+    bot.hears("Statistika", async (ctx) => {
       const userId = ctx.from?.id?.toString()
       if (!userId) return
 
-      // Check if user is still in group
       const isGroupMember = await this.isUserGroupMember(Number.parseInt(userId))
       if (!isGroupMember) {
-        await ctx.reply("Siz guruh a'zosi emassiz. Botdan foydalana olmaysiz.")
+        await ctx.reply("Siz guruh a'zosi emassiz.")
         return
       }
 
-      const chatMember = await ctx.telegram.getChatMember(groupId, Number.parseInt(userId))
-      if (!["administrator", "creator"].includes(chatMember.status)) {
-        await ctx.reply("Faqat adminlar statistikani ko'ra oladi.")
+      const user = await prisma.user.findUnique({
+        where: { telegramId: userId },
+        include: { tasks: { include: { task: true } } },
+      })
+
+      if (!user) {
+        await ctx.reply("Siz ro'yxatdan o'tmagansiz. /start buyrug'ini yuboring.")
         return
       }
 
-      const groupStatsImage = await generateGroupStatistics()
-      await ctx.replyWithPhoto({ source: groupStatsImage }, { caption: "Umumiy Statistika" })
+      const stats = await this.calculateUserStats(user)
+      const level = this.getUserLevel(user.currentStreak)
+
+      const message =
+        `📊 <b>Statistika</b>\n\n` +
+        `👤 <b>Ism familiya:</b> ${user.name}\n` +
+        `🏆 <b>Daraja:</b> ${level}\n` +
+        `🔥 <b>Uzluksiz kitob o'qish davomiyligi:</b> ${user.currentStreak} kun\n` +
+        `📅 <b>Guruhga a'zolikning:</b> ${stats.membershipDays} kuni\n` +
+        `✅ <b>Jami o'qigan kunlar:</b> ${stats.completedTasks}\n` +
+        `❌ <b>Jami qoldirgan kunlar:</b> ${stats.missedTasks}\n` +
+        `📊 <b>Mutolaa samaradorligi:</b> ${stats.efficiency}%`
+
+      await ctx.reply(message, { parse_mode: "HTML" })
     })
 
     // Admin command to sync group members
@@ -438,19 +556,12 @@ export class BotService {
       "Asia/Tashkent",
     )
 
-    // Daily fond statistics at 06:00
+    // Daily penalty check at 00:01 (1 minute after midnight)
     new CronJob(
-      "0 0 6 * * *",
+      "1 0 0 * * *",
       async () => {
-        const groupStatsImage = await generateGroupStatistics()
-        await bot.telegram.sendPhoto(
-          groupId,
-          { source: groupStatsImage },
-          {
-            caption: "💰 <b>Fond (Ehson)</b>\nUmumiy Statistika",
-            parse_mode: "HTML",
-          },
-        )
+        await this.checkAndApplyPenalties()
+        console.log("Daily penalty check completed")
       },
       null,
       true,
@@ -481,10 +592,8 @@ export class BotService {
 
         if (task) {
           for (const user of users) {
-            // Check if user is still in group before sending reminder
             const isGroupMember = await this.isUserGroupMember(Number.parseInt(user.telegramId))
             if (!isGroupMember) {
-              // Remove user from database if not in group
               await prisma.user.delete({ where: { id: user.id } })
               continue
             }
@@ -492,7 +601,7 @@ export class BotService {
             const pendingTask = user.tasks.find((t) => t.taskId === task.id && !t.completed)
             if (pendingTask) {
               try {
-                await bot.telegram.sendMessage(user.telegramId, "/vazifa belgiladingizmi?")
+                await bot.telegram.sendMessage(user.telegramId, "⏰ Eslatma: Bugungi vazifani belgiladingizmi? /vazifa")
               } catch (error) {
                 console.error(`Failed to send reminder to user ${user.telegramId}:`, error)
               }
