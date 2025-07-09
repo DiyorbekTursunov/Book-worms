@@ -4,3 +4,8 @@ services:
     env: node
     buildCommand: npm install && npm run build
     startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: development
+      - key: DATABASE_URL
+        value: YOUR_POSTGRESQL_URL
