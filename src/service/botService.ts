@@ -20,7 +20,7 @@ interface Task {
   id: number
   description: string
   scheduledDate: Date
-  createdAt: Date
+  createdAt?: Date // Make createdAt optional
 }
 
 dotenv.config()
