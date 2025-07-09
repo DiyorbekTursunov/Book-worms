@@ -44,7 +44,7 @@ export class BotService {
               keyboard: [[
                 {
                   text: 'Admin panelini ochish',
-                  web_app: { url: 'https://your-domain.com/index.html' } // Replace with your actual domain
+                  web_app: { url: 'https://book-worms-webapp.vercel.app' } // Replace with your actual domain
                 }
               ]],
               resize_keyboard: true
@@ -52,7 +52,7 @@ export class BotService {
           });
         } else {
           // Send URL link in group chat
-          await ctx.reply('Admin paneli: https://your-domain.com/index.html', {
+          await ctx.reply('Admin paneli: https://book-worms-webapp.vercel.app', {
             reply_markup: { remove_keyboard: true }
           });
         }
