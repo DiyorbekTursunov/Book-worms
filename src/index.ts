@@ -70,8 +70,21 @@ app.post("/api/tasks", async (req, res) => {
       })
     }
 
-    // Vazifani kanalga yuborish
-    await BotService.sendTaskToChannel(task)
+    // Bugungi kun uchun vazifa yaratilganda va soat 6:00 dan keyin bo'lsa darhol yuborish
+    const now = new Date()
+    const isToday = selectedDate.getTime() === today.getTime()
+    const currentHour = now.getHours()
+
+    if (isToday && currentHour >= 6) {
+      await BotService.sendTaskToChannel(task)
+      console.log(
+        `Bugungi vazifa darhol kanalga yuborildi (soat ${currentHour}:${now.getMinutes().toString().padStart(2, "0")})`,
+      )
+    } else if (isToday && currentHour < 6) {
+      console.log("Bugungi vazifa yaratildi, soat 6:00 da yuboriladi")
+    } else {
+      console.log("Ertangi vazifa yaratildi, tegishli kuni soat 6:00 da yuboriladi")
+    }
 
     res.json(task)
   } catch (error) {
@@ -117,8 +130,21 @@ app.put("/api/tasks/:id", async (req, res) => {
       },
     })
 
-    // Vazifa yangilanishini kanalga yuborish
-    await BotService.sendTaskUpdateToChannel(task)
+    // Bugungi kun uchun vazifa yangilanganda va soat 6:00 dan keyin bo'lsa darhol yuborish
+    const now = new Date()
+    const isToday = selectedDate.getTime() === today.getTime()
+    const currentHour = now.getHours()
+
+    if (isToday && currentHour >= 6) {
+      await BotService.sendTaskUpdateToChannel(task)
+      console.log(
+        `Bugungi vazifa yangilanishi darhol kanalga yuborildi (soat ${currentHour}:${now.getMinutes().toString().padStart(2, "0")})`,
+      )
+    } else if (isToday && currentHour < 6) {
+      console.log("Bugungi vazifa yangilandi, soat 6:00 da yuboriladi")
+    } else {
+      console.log("Ertangi vazifa yangilandi, tegishli kuni soat 6:00 da yuboriladi")
+    }
 
     res.json(task)
   } catch (error) {
@@ -143,8 +169,25 @@ app.delete("/api/tasks/:id", async (req, res) => {
     // Vazifani o'chirish (TaskCompletion lar ham avtomatik o'chiriladi)
     await prisma.task.delete({ where: { id: taskId } })
 
-    // Vazifa o'chirilishini kanalga yuborish
-    await BotService.sendTaskDeletionToChannel(task)
+    // Bugungi kun uchun vazifa o'chirilganda va soat 6:00 dan keyin bo'lsa darhol yuborish
+    const now = new Date()
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const taskDate = new Date(task.scheduledDate)
+    taskDate.setHours(0, 0, 0, 0)
+    const currentHour = now.getHours()
+
+    const isToday = taskDate.getTime() === today.getTime()
+    if (isToday && currentHour >= 6) {
+      await BotService.sendTaskDeletionToChannel(task)
+      console.log(
+        `Bugungi vazifa o'chirilishi darhol kanalga yuborildi (soat ${currentHour}:${now.getMinutes().toString().padStart(2, "0")})`,
+      )
+    } else if (isToday && currentHour < 6) {
+      console.log("Bugungi vazifa o'chirildi, soat 6:00 gacha bo'lgani uchun kanalga xabar yuborilmadi")
+    } else {
+      console.log("Ertangi vazifa o'chirildi, kanalga xabar yuborilmadi")
+    }
 
     res.json({ success: true })
   } catch (error) {
