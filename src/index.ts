@@ -66,6 +66,7 @@ app.post("/api/tasks", async (req, res) => {
           taskId: task.id,
           completed: false,
           penaltyPaid: false,
+          penaltyAppliedAt: null, // Jarima hali qo'llanilmagan
         },
       })
     }
@@ -210,12 +211,22 @@ app.get("/api/users", async (req, res) => {
 app.post("/api/users/:id/mark-payment", async (req, res) => {
   try {
     const userId = Number.parseInt(req.params.id)
-    await prisma.taskCompletion.updateMany({
-      where: { userId, completed: false, penaltyPaid: false },
+
+    // Faqat jarima qo'llanilgan va to'lanmagan vazifalarni to'langan deb belgilash
+    const result = await prisma.taskCompletion.updateMany({
+      where: {
+        userId,
+        completed: false,
+        penaltyPaid: false,
+        penaltyAppliedAt: { not: null }, // Faqat jarima qo'llanilgan vazifalar
+      },
       data: { penaltyPaid: true },
     })
-    res.json({ success: true })
+
+    console.log(`User ${userId} uchun ${result.count} ta jarima to'langan deb belgilandi`)
+    res.json({ success: true, updatedCount: result.count })
   } catch (error) {
+    console.error("To'lovni belgilashda xatolik:", error)
     res.status(500).json({ error: "To'lovni belgilashda xatolik" })
   }
 })

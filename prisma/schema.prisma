@@ -20,16 +20,19 @@ model Task {
   id            Int      @id @default(autoincrement())
   description   String
   scheduledDate DateTime
+  createdAt     DateTime @default(now())
   completions   TaskCompletion[]
 }
 
 model TaskCompletion {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  taskId      Int
-  completed   Boolean  @default(false)
-  penaltyPaid Boolean  @default(false)
-  user        User     @relation(fields: [userId], references: [id])
-  task        Task     @relation(fields: [taskId], references: [id])
+  id               Int       @id @default(autoincrement())
+  userId           Int
+  taskId           Int
+  completed        Boolean   @default(false)
+  penaltyPaid      Boolean   @default(false)
+  penaltyAppliedAt DateTime? // Jarima qo'llanilgan vaqt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task             Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
   @@unique([userId, taskId])
 }

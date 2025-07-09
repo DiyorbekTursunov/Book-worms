@@ -165,7 +165,10 @@ export class BotService {
         },
       })
 
-      if (!yesterdayTask) return
+      if (!yesterdayTask) {
+        console.log("Kecha uchun vazifa topilmadi")
+        return
+      }
 
       // Find all users who didn't complete yesterday's task
       const users = await prisma.user.findMany({
@@ -179,6 +182,7 @@ export class BotService {
       for (const user of users) {
         const taskCompletion = user.tasks[0]
 
+        // Agar user vazifani bajarmagan bo'lsa jarima qo'llash
         if (!taskCompletion || !taskCompletion.completed) {
           // Reset streak to 0 for users who missed the task
           await prisma.user.update({
@@ -186,19 +190,94 @@ export class BotService {
             data: { currentStreak: 0 },
           })
 
-          // Mark as penalty (unpaid)
+          // Mark as penalty (unpaid) with penalty date
           if (taskCompletion) {
             await prisma.taskCompletion.update({
               where: { id: taskCompletion.id },
-              data: { penaltyPaid: false },
+              data: {
+                penaltyPaid: false,
+                penaltyAppliedAt: new Date(), // Jarima qo'llanilgan vaqt
+              },
+            })
+          } else {
+            // Agar TaskCompletion mavjud bo'lmasa yaratish
+            await prisma.taskCompletion.create({
+              data: {
+                userId: user.id,
+                taskId: yesterdayTask.id,
+                completed: false,
+                penaltyPaid: false,
+                penaltyAppliedAt: new Date(),
+              },
             })
           }
 
-          console.log(`Applied penalty to user ${user.name} - streak reset to 0`)
+          console.log(`Jarima qo'llanildi: ${user.name} - streak 0 ga qaytarildi`)
+        }
+      }
+
+      console.log("Kunlik jarima tekshiruvi tugallandi")
+    } catch (error) {
+      console.error("Jarima qo'llashda xatolik:", error)
+    }
+  }
+
+  // Check and kick users with unpaid penalties after 7 days
+  static async checkAndKickUnpaidUsers() {
+    try {
+      const sevenDaysAgo = new Date()
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+
+      // Find users with unpaid penalties older than 7 days
+      const usersWithOldPenalties = await prisma.user.findMany({
+        include: {
+          tasks: {
+            where: {
+              completed: false,
+              penaltyPaid: false,
+              penaltyAppliedAt: {
+                lte: sevenDaysAgo,
+                not: null,
+              },
+            },
+            include: { task: true },
+          },
+        },
+      })
+
+      for (const user of usersWithOldPenalties) {
+        if (user.tasks.length > 0) {
+          try {
+            // Kick user from group
+            await bot.telegram.banChatMember(groupId, Number.parseInt(user.telegramId))
+
+            // Delete user from database
+            await prisma.user.delete({
+              where: { id: user.id },
+            })
+
+            console.log(`User ${user.name} (${user.telegramId}) kicked for unpaid penalty after 7 days`)
+
+            // Notify admins
+            const admins = await bot.telegram.getChatAdministrators(groupId)
+            const adminMessage = `🚫 Foydalanuvchi guruhdan chiqarildi:\n👤 ${user.name}\n📅 Sabab: 7 kun ichida jarima to'lanmadi`
+
+            for (const admin of admins) {
+              if (!admin.user.is_bot) {
+                try {
+                  await bot.telegram.sendMessage(admin.user.id, adminMessage)
+                } catch (error) {
+                  console.error(`Failed to notify admin ${admin.user.id}:`, error)
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`Failed to kick user ${user.telegramId}:`, error)
+          }
         }
       }
     } catch (error) {
-      console.error("Error applying penalties:", error)
+      console.error("Foydalanuvchilarni chiqarishda xatolik:", error)
     }
   }
 
@@ -562,6 +641,18 @@ export class BotService {
       async () => {
         await this.checkAndApplyPenalties()
         console.log("Daily penalty check completed")
+      },
+      null,
+      true,
+      "Asia/Tashkent",
+    )
+
+    // Check and kick users with unpaid penalties every day at 00:05
+    new CronJob(
+      "5 0 0 * * *",
+      async () => {
+        await this.checkAndKickUnpaidUsers()
+        console.log("Daily kick check completed")
       },
       null,
       true,
