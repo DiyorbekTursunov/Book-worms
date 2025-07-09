@@ -9,5 +9,5 @@ if (!process.env.BOT_TOKEN || !process.env.GROUP_ID) {
 export const config = {
   botToken: process.env.BOT_TOKEN,
   groupId: process.env.GROUP_ID,
-  adminIds: ['1802639780'] // Adminlarning Telegram IDlari (o'zingiznikini qo'shing)
+  adminIds: ['1802639780','945323839'] // Adminlarning Telegram IDlari (o'zingiznikini qo'shing)
 };
